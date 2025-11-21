@@ -191,43 +191,52 @@ with tab2:
 with tab3:
     st.header("Segmentación Conductual con Inteligencia Artificial")
     st.markdown("""
-    **Más allá del "cliente promedio":**
-    Utilizamos un algoritmo de Machine Learning no supervisado (**K-Means Clustering**) para agrupar a los clientes.
+    **Más allá del "cliente promedio":** Utilizamos un algoritmo de Machine Learning no supervisado (**K-Means**) para detectar patrones.
     """)
 
     # --- 1. CÁLCULO DE METRICAS ---
     metrics = df_clusters.groupby('cluster')[['recency', 'frequency', 'monetary', 'avg_review_score']].mean()
     counts = df_clusters['cluster'].value_counts()
 
-    # Mapeo de Clusters (Ajusta estos índices si tus colores cambiaron)
+    # Mapeo (Ajusta los índices si tus colores cambian)
     c_vip = 3
     c_sleep = 2
     c_recent = 0
     c_risk = 1
-
-    # Definimos el orden exacto que queremos para TODO (Gráfica, Cards y Tabla)
     orden_visual = ["💎 VIP", "🌱 Recientes", "💤 Olvidados", "⚠️ En Riesgo"]
 
-    # Función para asignar nombres
     def asignar_nombre(c):
         if c == c_vip: return "💎 VIP"
         elif c == c_sleep: return "💤 Olvidados"
         elif c == c_recent: return "🌱 Recientes"
         else: return "⚠️ En Riesgo"
 
-    # --- 2. VISUALIZACIÓN ---
-    col_viz_cluster, col_desc_cluster = st.columns([3, 2])
+    # --- 2. LAYOUT OPTIMIZADO (Columna Izquierda Grande / Derecha Estrecha) ---
+    # Cambiamos la proporción a [2.5, 1] para dar más espacio al gráfico
+    col_viz_cluster, col_desc_cluster = st.columns([2.5, 1])
     
+    # === COLUMNA IZQUIERDA: GRÁFICO + TABLA ===
     with col_viz_cluster:
         df_viz = df_clusters.copy()
         df_viz = df_viz[df_viz['monetary'] < 3000] # Filtro visual
         df_viz['Segmento'] = df_viz['cluster'].apply(asignar_nombre)
 
-        # GRÁFICO: Usamos 'category_orders' para forzar el orden de la leyenda
-        fig_cluster = px.scatter(df_viz, x="recency", y="monetary", color="Segmento", 
-                                 opacity=0.5, title="Mapa de Audiencias (Zoom < R$ 3000)",
-                                 labels={"recency": "Días sin comprar", "monetary": "Gasto Total"},
-                                 category_orders={"Segmento": orden_visual}, # <--- AQUÍ ESTÁ EL TRUCO
+        # GRÁFICO MÁS GRANDE Y CON SCORE VISIBLE
+        fig_cluster = px.scatter(df_viz, 
+                                 x="recency", 
+                                 y="monetary", 
+                                 color="Segmento",
+                                 # AQUI ESTÁ EL CAMBIO DE VISUALIZACIÓN:
+                                 # Usamos el tamaño para otra variable o lo dejamos fijo pero legible
+                                 size="monetary", 
+                                 size_max=35, # Burbujas más grandes
+                                 opacity=0.6, 
+                                 height=550,  # <--- HACE EL GRÁFICO MÁS ALTO PARA LLENAR ESPACIO
+                                 title="Mapa de Audiencias (Zoom < R$ 3000)",
+                                 labels={"recency": "Días sin comprar", "monetary": "Gasto Total", "avg_review_score": "Satisfacción"},
+                                 # TOOLTIP MEJORADO: Para ver el score al pasar el mouse
+                                 hover_data={"Segmento": False, "avg_review_score": ":.1f"}, 
+                                 category_orders={"Segmento": orden_visual},
                                  color_discrete_map={
                                      "💎 VIP": "#00CC96", 
                                      "💤 Olvidados": "#EF553B", 
@@ -235,60 +244,57 @@ with tab3:
                                      "⚠️ En Riesgo": "#AB63FA"
                                  })
         
-        # Leyenda arriba para ahorrar espacio
-        fig_cluster.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        # Ajustes finos de diseño
+        fig_cluster.update_layout(
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=20, r=20, t=50, b=20)
+        )
         st.plotly_chart(fig_cluster, use_container_width=True)
-
-    # --- 3. ESTRATEGIAS (EN EL MISMO ORDEN) ---
-    with col_desc_cluster:
-        st.subheader("Estrategias por Audiencia")
         
-        # 1. VIP
+        # --- MOVIMOS LA TABLA AQUÍ (Debajo del gráfico) ---
+        st.markdown("### 📋 Métricas Detalladas por Segmento")
+        tabla_final = metrics.copy()
+        tabla_final.index = [asignar_nombre(i) for i in tabla_final.index]
+        tabla_final = tabla_final.reindex(orden_visual)
+        # Estilizando la tabla para que ocupe el ancho y se vea integrada
+        st.dataframe(tabla_final.style.format("{:.2f}").background_gradient(cmap="Blues"), use_container_width=True)
+
+    # === COLUMNA DERECHA: ESTRATEGIAS ===
+    with col_desc_cluster:
+        st.subheader("Estrategias (Playbook)")
+        
         vip_data = metrics.loc[c_vip]
         st.success(f"""
-        ##### 💎 VIP (Champions) | {counts[c_vip]:,} Usuarios
+        ##### 💎 VIP | {counts[c_vip]:,} Users
         *El motor de rentabilidad.*
-        - 💰 **Gasto Prom:** R$ {vip_data['monetary']:.0f} (vs R$ 140 avg)
-        - 🔄 **Frecuencia:** {vip_data['frequency']:.1f} compras
+        - 💰 **Gasto:** R$ {vip_data['monetary']:.0f}
+        - 🔄 **Freq:** {vip_data['frequency']:.1f}x
+        - ⭐ **Score:** {vip_data['avg_review_score']:.1f}
         - 🎯 **Acción:** Nivel "Gold" + Envíos gratis.
         """)
         
-        # 2. RECIENTES
         recent_data = metrics.loc[c_recent]
         st.info(f"""
-        ##### 🌱 Recientes (Promising) | {counts[c_recent]:,} Usuarios
-        *Alto potencial de desarrollo.*
-        - 📅 **Última compra:** Hace {recent_data['recency']:.0f} días
-        - ⭐ **Satisfacción:** {recent_data['avg_review_score']:.1f} / 5.0
-        - 🎯 **Acción:** Cupón 2da compra (Urgente < 30 días).
+        ##### 🌱 Recientes | {counts[c_recent]:,} Users
+        *Alto potencial.*
+        - 📅 **Hace:** {recent_data['recency']:.0f} días
+        - ⭐ **Score:** {recent_data['avg_review_score']:.1f}
+        - 🎯 **Acción:** Cupón urgente.
         """)
         
-        # 3. OLVIDADOS
         sleep_data = metrics.loc[c_sleep]
         st.warning(f"""
-        ##### 💤 Olvidados (Sleeping) | {counts[c_sleep]:,} Usuarios
-        *Dinero dejado sobre la mesa.*
-        - 💤 **Inactividad:** {sleep_data['recency']:.0f} días (> 1 año)
-        - 🎯 **Acción:** Reactivación agresiva ("Te extrañamos").
+        ##### 💤 Olvidados | {counts[c_sleep]:,} Users
+        *Dinero en la mesa.*
+        - 💤 **Inactivo:** {sleep_data['recency']:.0f} días
+        - ⭐ **Score:** {sleep_data['avg_review_score']:.1f}
+        - 🎯 **Acción:** Reactivación.
         """)
         
-        # 4. EN RIESGO
         risk_data = metrics.loc[c_risk]
         st.error(f"""
-        ##### ⚠️ En Riesgo (Detractors) | {counts[c_risk]:,} Usuarios
-        *Problema operativo detectado.*
-        - ⭐ **Satisfacción Crítica:** {risk_data['avg_review_score']:.1f} / 5.0
-        - 🎯 **Acción:** Auditoría logística. No hacer retargeting.
+        ##### ⚠️ En Riesgo | {counts[c_risk]:,} Users
+        *Problema operativo.*
+        - ⭐ **Score Crítico:** {risk_data['avg_review_score']:.1f}
+        - 🎯 **Acción:** Auditoría logística.
         """)
-
-    # --- 4. TABLA MEJORADA (REORDENADA) ---
-    st.write("---")
-    with st.expander("📋 Ver Tabla de Métricas Detallada"):
-        # Preparamos la tabla
-        tabla_final = metrics.copy()
-        # Le ponemos los nombres
-        tabla_final.index = [asignar_nombre(i) for i in tabla_final.index]
-        # LA REORDENAMOS para que coincida con el gráfico y las cards
-        tabla_final = tabla_final.reindex(orden_visual) 
-        
-        st.dataframe(tabla_final.style.format("{:.2f}").background_gradient(cmap="Blues"))
