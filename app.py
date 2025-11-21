@@ -146,63 +146,105 @@ with tab3:
     st.markdown("""
     **Más allá del "cliente promedio":**
     Utilizamos un algoritmo de Machine Learning no supervisado (**K-Means Clustering**) para agrupar a los clientes.
-    
-    El siguiente gráfico muestra cómo se distribuyen tus clientes según cuánto tiempo hace que compraron (Eje X) y cuánto gastaron (Eje Y).
     """)
-    
-    # --- PREPARACIÓN DE DATOS PARA VISUALIZACIÓN ---
-    # 1. Creamos una copia para no dañar los datos originales
-    df_viz = df_clusters.copy()
-    
-    # 2. TRUCO PRO: Eliminamos el "ruido" visual (Outliers)
-    # Filtramos los clientes que gastaron más de $3000 para que el gráfico no se vea "aplastado"
-    # (Esto nos permite ver mejor a la gran mayoría de clientes)
-    df_viz = df_viz[df_viz['monetary'] < 3000]
-    
-    # 3. Asignamos NOMBRES a los clusters (En lugar de números 0,1,2,3)
-    # NOTA: Ajusta estos nombres según lo que veas en tu análisis. 
-    # K-Means asigna números aleatorios, así que verifica cuál es cuál.
-    # Aquí asumo una lógica estándar, pero puedes cambiar los textos a la derecha.
-    def asignar_etiqueta(row):
-        # Lógica ejemplo (Ajusta según tus datos si es necesario)
-        if row['frequency'] > 1 and row['monetary'] > 200:
-            return "💎 VIP (Frecuentes)"
-        elif row['recency'] > 300:
-            return "💤 Olvidados (Inactivos)"
-        elif row['recency'] < 150 and row['monetary'] < 200:
-            return "🌱 Recientes (Prometedores)"
-        else:
-            return "⚠️ En Riesgo (Standard)"
 
-    # Aplicamos la función para crear una columna de "Nombre del Segmento"
-    df_viz['Segmento'] = df_viz.apply(asignar_etiqueta, axis=1)
+    # --- 1. CÁLCULO DE METRICAS (La parte nueva) ---
+    # Agrupamos los datos para obtener los promedios que mostraste en tu imagen
+    # Esto calcula automáticamente los números para que no tengas que escribirlos a mano
+    metrics = df_clusters.groupby('cluster')[['recency', 'frequency', 'monetary', 'avg_review_score']].mean()
+    counts = df_clusters['cluster'].value_counts()
 
+    # Definimos quién es quién basándonos en tu imagen:
+    # Cluster 3 = VIP (Alto Gasto/Frecuencia)
+    # Cluster 2 = Olvidados (Recency alta ~398)
+    # Cluster 0 = Recientes (Recency baja ~127)
+    # Cluster 1 = En Riesgo (Score bajo ~1.6)
+    
+    # Extraemos los datos para usarlos en el texto (Formato amigable)
+    # VIP (Cluster 3)
+    c_vip = 3
+    vip_gasto = metrics.loc[c_vip, 'monetary']
+    vip_freq = metrics.loc[c_vip, 'frequency']
+    vip_count = counts[c_vip]
+
+    # Olvidados (Cluster 2)
+    c_sleep = 2
+    sleep_days = metrics.loc[c_sleep, 'recency']
+    sleep_count = counts[c_sleep]
+
+    # Recientes (Cluster 0)
+    c_recent = 0
+    recent_days = metrics.loc[c_recent, 'recency']
+    recent_score = metrics.loc[c_recent, 'avg_review_score']
+    recent_count = counts[c_recent]
+
+    # Riesgo (Cluster 1)
+    c_risk = 1
+    risk_score = metrics.loc[c_risk, 'avg_review_score']
+    risk_count = counts[c_risk]
+
+
+    # --- 2. VISUALIZACIÓN ---
     col_viz_cluster, col_desc_cluster = st.columns([3, 2])
     
     with col_viz_cluster:
-        # Scatter Plot MEJORADO
-        fig_cluster = px.scatter(df_viz, 
-                                 x="recency", 
-                                 y="monetary", 
-                                 color="Segmento", # Ahora usa nombres reales
-                                 opacity=0.5, # Un poco más transparente para ver densidad
-                                 title="Mapa de Audiencias (Zoom en clientes < R$ 3000)",
-                                 labels={"recency": "Días desde última compra", "monetary": "Gasto Total"},
-                                 color_discrete_map={
-                                     "💎 VIP (Frecuentes)": "#00CC96",  # Verde
-                                     "💤 Olvidados (Inactivos)": "#EF553B", # Rojo
-                                     "🌱 Recientes (Prometedores)": "#636EFA", # Azul
-                                     "⚠️ En Riesgo (Standard)": "#AB63FA" # Morado
-                                 })
-        
-        fig_cluster.update_layout(legend_title_text="Tipo de Cliente")
-        st.plotly_chart(fig_cluster, use_container_width=True)
-        st.caption("Nota: Se han ocultado visualmente los clientes 'Whales' (>R$3000) para facilitar la lectura de los segmentos principales.")
+        # Preparamos datos para el gráfico (Zoom in)
+        df_viz = df_clusters.copy()
+        df_viz = df_viz[df_viz['monetary'] < 3000] # Filtro visual
 
+        # Función para pintar los puntos del color correcto según el cluster
+        def asignar_nombre(c):
+            if c == c_vip: return "💎 VIP"
+            elif c == c_sleep: return "💤 Olvidados"
+            elif c == c_recent: return "🌱 Recientes"
+            else: return "⚠️ En Riesgo"
+            
+        df_viz['Segmento'] = df_viz['cluster'].apply(asignar_nombre)
+
+        fig_cluster = px.scatter(df_viz, x="recency", y="monetary", color="Segmento", 
+                                 opacity=0.5, title="Mapa de Audiencias (Zoom < R$ 3000)",
+                                 color_discrete_map={"💎 VIP": "#00CC96", "💤 Olvidados": "#EF553B", "🌱 Recientes": "#636EFA", "⚠️ En Riesgo": "#AB63FA"})
+        st.plotly_chart(fig_cluster, use_container_width=True)
+
+
+    # --- 3. ESTRATEGIAS CON DATOS DUROS (La parte rica) ---
     with col_desc_cluster:
         st.subheader("Estrategias por Audiencia")
         
-        st.success("**💎 VIP (Frecuentes):**\nSon tu mina de oro. Compran seguido y gastan bien. \n\n**Acción:** Programa de lealtad premium.")
-        st.info("**🌱 Recientes:**\nClientes nuevos con potencial. \n\n**Acción:** Email de bienvenida con descuento en 2da compra.")
-        st.warning("**💤 Olvidados:**\nHace mucho que no vienen (Eje X lejano). \n\n**Acción:** Campaña de reactivación agresiva.")
-        st.error("**⚠️ En Riesgo:**\nComportamiento errático o bajo valor. \n\n**Acción:** Investigar satisfacción.")
+        # Usamos f-strings (f"...") para meter los números calculados en el texto
+        
+        st.success(f"""
+        **💎 VIP (Champions) | {vip_count:,} Usuarios**
+        *El motor de rentabilidad.*
+        
+        * **Dato Clave:** Gastan **R$ {vip_gasto:.0f}** en promedio (vs R$ 140 global) y compran **{vip_freq:.1f} veces**.
+        * **Acción:** Crear nivel "Gold" con envíos gratis. Aumentar barrera de salida.
+        """)
+        
+        st.info(f"""
+        **🌱 Recientes (Promising) | {recent_count:,} Usuarios**
+        *Nuevos usuarios con alto potencial.*
+        
+        * **Dato Clave:** Su última compra fue hace solo **{recent_days:.0f} días** y tienen satisfacción alta (**{recent_score:.1f}/5**).
+        * **Acción:** Email de "Bienvenida" + Cupón de 2da compra urgente (antes de 30 días).
+        """)
+        
+        st.warning(f"""
+        **💤 Olvidados (Sleeping) | {sleep_count:,} Usuarios**
+        *Dinero dejado sobre la mesa.*
+        
+        * **Dato Clave:** No compran hace **{sleep_days:.0f} días** (más de un año), pero cuando compraron quedaron felices.
+        * **Acción:** Reactivación agresiva. "Te extrañamos". Es 5x más barato reactivarlos que traer nuevos.
+        """)
+        
+        st.error(f"""
+        **⚠️ En Riesgo (Detractors) | {risk_count:,} Usuarios**
+        *Problema operativo detectado.*
+        
+        * **Dato Clave:** Su satisfacción es crítica (**{risk_score:.1f}/5**). Probablemente sufrieron retrasos logísticos.
+        * **Acción:** No invertir en publicidad para ellos. Auditoría de sus pedidos para evitar boca a boca negativo.
+        """)
+
+    # Tabla técnica al final
+    with st.expander("Ver Tabla de Datos Exactos"):
+        st.dataframe(metrics.style.format("{:.2f}"))
