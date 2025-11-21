@@ -53,91 +53,116 @@ with st.sidebar:
 # Nombres más orientados a negocio
 tab1, tab2, tab3 = st.tabs(["📊 1. Salud del Negocio", "🚚 2. Diagnóstico de Fricción (CX)", "🤖 3. Segmentación & Audiencias (AI)"])
 
-# === TAB 1: SALUD DEL NEGOCIO ===
+# === TAB 1: SALUD DEL NEGOCIO (GROWTH VIEW) ===
 with tab1:
-    st.header("Panorama General del E-commerce")
-    st.markdown("Antes de optimizar, necesitamos entender el volumen y estado actual de las operaciones.")
+    st.header("Panorama General & Tendencias")
     
-    # KPIs (Métricas Clave)
-    col1, col2, col3 = st.columns(3)
+    # 1. PREPARACIÓN DE DATOS TEMPORALES
+    # Asegurarnos de que la fecha sea datetime
+    df_orders['order_purchase_timestamp'] = pd.to_datetime(df_orders['order_purchase_timestamp'])
+    
+    # Crear columnas de Año-Mes para agrupar
+    df_orders['mes'] = df_orders['order_purchase_timestamp'].dt.to_period('M').astype(str)
+    
+    # Agrupar ventas por mes
+    ventas_mensuales = df_orders.groupby('mes')['price'].sum().reset_index()
+    
+    # Calcular métricas globales
     total_ventas = df_orders['price'].sum()
-    avg_score = df_orders['review_score'].mean()
     total_orders = df_orders['order_id'].nunique()
+    ticket_promedio = total_ventas / total_orders
     
-    # Usamos delta para darle color (asumiendo un objetivo ficticio para que se vea bien)
-    col1.metric("Ventas Totales (Histórico)", f"R$ {total_ventas:,.0f}", delta="Revenue Base")
-    col2.metric("Score Promedio de Satisfacción", f"{avg_score:.2f} / 5.0", delta="-0.5 vs Target", delta_color="inverse")
-    col3.metric("Total Pedidos Procesados", f"{total_orders:,}")
+    # 2. KPIs DE NEGOCIO (Más detallados)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("💰 Ventas Totales", f"R$ {total_ventas:,.0f}")
+    col2.metric("📦 Total Pedidos", f"{total_orders:,}")
+    col3.metric("🏷️ Ticket Promedio", f"R$ {ticket_promedio:.2f}")
     
-    st.write("---")
+    st.markdown("---")
     
-    col_viz, col_text = st.columns([2, 1])
-    with col_viz:
-        # Gráfico de Funnel
-        st.subheader("Funnel Operacional")
+    # 3. GRÁFICOS DE TENDENCIA Y GEOGRAFÍA
+    col_trend, col_geo = st.columns([2, 1])
+    
+    with col_trend:
+        st.subheader("Evolución de Ventas Mensuales")
+        fig_trend = px.line(ventas_mensuales, x='mes', y='price', markers=True,
+                            title="Tendencia de Ingresos (Growth)",
+                            labels={'mes': 'Mes', 'price': 'Ingresos (R$)'})
+        fig_trend.update_traces(line_color='#00CC96')
+        st.plotly_chart(fig_trend, use_container_width=True)
+        
+    with col_geo:
+        st.subheader("Top Mercados (Estados)")
+        # Contar pedidos por estado
+        top_states = df_orders['customer_state'].value_counts().head(5).reset_index()
+        top_states.columns = ['Estado', 'Pedidos']
+        
+        fig_geo = px.bar(top_states, x='Estado', y='Pedidos', 
+                         title="Top 5 Regiones", color='Pedidos',
+                         color_continuous_scale='Blues')
+        st.plotly_chart(fig_geo, use_container_width=True)
+
+    # 4. FUNNEL OPERATIVO (Lo mantenemos pero más pequeño abajo)
+    with st.expander("Ver Funnel Operativo Detallado"):
         status_counts = df_orders['order_status'].value_counts().reset_index()
         status_counts.columns = ['Estado', 'Cantidad']
-        # Ordenamos para que parezca embudo
-        orden_embudo = ['approved', 'processing', 'shipped', 'delivered', 'canceled', 'unavailable']
-        status_counts['Estado'] = pd.Categorical(status_counts['Estado'], categories=orden_embudo, ordered=True)
-        status_counts = status_counts.sort_values('Estado')
-
-        fig_funnel = px.funnel(status_counts, x='Cantidad', y='Estado', title="Flujo de Pedidos (Funnel View)")
+        orden = ['approved', 'processing', 'shipped', 'delivered', 'canceled']
+        fig_funnel = px.funnel(status_counts, x='Cantidad', y='Estado')
         st.plotly_chart(fig_funnel, use_container_width=True)
-    
-    with col_text:
-        st.subheader("Análisis del Funnel")
-        st.markdown("""
-        **Observaciones:**
-        * La gran mayoría de los pedidos (>90%) llegan al estado `delivered` (entregado).
-        * La tasa de cancelación es visible pero baja en comparación al volumen total.
-        
-        **Pregunta de Negocio:**
-        Si el funnel operativo parece sano, ¿por qué nuestro Score Promedio es solo 4.0? Debemos investigar la **experiencia del cliente (CX)** en la siguiente pestaña.
-        """)
 
 # === TAB 2: DIAGNÓSTICO DE FRICCIÓN (CX) ===
 with tab2:
-    st.header("¿Qué está matando la satisfacción del cliente?")
-    st.markdown("""
-    **El Problema:** Tenemos una cantidad significativa de reseñas de 1 y 2 estrellas que afectan el NPS y la retención.
+    st.header("Impacto Logístico en la Experiencia (CX)")
     
-    **Hipótesis:** En e-commerce, la principal fricción suele ser el incumplimiento de la promesa de entrega.
-    
-    A continuación, cruzamos los datos de **tiempo de entrega real vs. prometido** contra la **puntuación** que dejó el cliente.
-    """)
-    
-    # Recalcular columnas de fechas (necesario al leer de CSV)
+    # 1. CÁLCULOS DE FRICTION
+    # Convertir a numérico
     df_orders['diferencia_estimada_dias'] = pd.to_numeric(df_orders['diferencia_estimada_dias'], errors='coerce')
     
-    # Filtro para el gráfico
+    # Definir "Pedido Tardío" (Late Order): Diferencia > 0
+    late_orders = df_orders[df_orders['diferencia_estimada_dias'] > 0]
+    pct_late = (len(late_orders) / len(df_orders)) * 100
+    
+    # Promedio de retraso para reviews de 1 estrella
+    avg_delay_1star = df_orders[df_orders['review_score'] == 1]['diferencia_estimada_dias'].median()
+    avg_delay_5star = df_orders[df_orders['review_score'] == 5]['diferencia_estimada_dias'].median()
+    
+    # 2. KPIs DE DOLOR
+    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+    
+    col_kpi1.metric("⚠️ Tasa de Pedidos Tardíos", f"{pct_late:.1f}%", delta="Objetivo < 5%", delta_color="inverse")
+    
+    col_kpi2.metric("😠 Retraso en Clientes 1★", f"{avg_delay_1star:.1f} días", 
+                    help="Mediana de días de retraso para clientes que dieron 1 estrella.")
+    
+    col_kpi3.metric("😍 Entrega en Clientes 5★", f"{avg_delay_5star:.1f} días",
+                    delta="Entregas anticipadas",
+                    help="Mediana de días de ANTICIPACIÓN para clientes felices.")
+    
+    st.write("---")
+
+    # 3. VISUALIZACIÓN PRINCIPAL (BOXPLOT)
+    st.subheader("Correlación: Tiempo de Entrega vs. Calificación")
+    st.markdown("Este gráfico demuestra que la **velocidad de entrega** es el predictor más fuerte de la satisfacción.")
+    
+    # Filtro visual para quitar ruido extremo
     df_plot = df_orders[
         (df_orders['diferencia_estimada_dias'] > -60) & 
         (df_orders['diferencia_estimada_dias'] < 60)
     ]
     
-    # Boxplot Mejorado
     fig_box = px.box(df_plot, x="review_score", y="diferencia_estimada_dias", 
                      color="review_score",
-                     color_discrete_sequence=px.colors.diverging.RdYlGn, # Semáforo: Rojo a Verde
-                     title="Impacto del Retraso Logístico en la Calificación (Boxplot)",
-                     labels={"review_score": "Estrellas dadas por el Cliente", "diferencia_estimada_dias": "Días vs. Promesa (+ Tarde / - Temprano)"})
+                     color_discrete_sequence=px.colors.diverging.RdYlGn,
+                     labels={"review_score": "Estrellas", "diferencia_estimada_dias": "Días de Retraso (+ Tarde / - Temprano)"})
     
-    # Línea de referencia
-    fig_box.add_hline(y=0, line_dash="dot", line_color="black", annotation_text="Fecha Prometida (Día 0)")
-    fig_box.update_layout(yaxis_title="Días de Retraso (Positivo) o Adelanto (Negativo)")
-    
+    fig_box.add_hline(y=0, line_dash="dot", line_color="black", annotation_text="Promesa de Entrega")
     st.plotly_chart(fig_box, use_container_width=True)
     
-    # INSIGHT BOX (Lo más importante)
+    # 4. CONCLUSIÓN DE NEGOCIO
     st.error("""
-    🎯 **INSIGHT CRÍTICO PARA OPERACIONES:**
-    
-    El gráfico confirma la hipótesis contundentemente.
-    * **Clientes Detractores (1 Estrella):** La mediana de sus pedidos llegó **en la fecha límite o tarde** (la caja cruza la línea cero hacia arriba). La variabilidad es enorme, indicando un proceso logístico fuera de control para este grupo.
-    * **Clientes Promotores (5 Estrellas):** Reciben sus pedidos consistentemente **mucho antes** de lo prometido (toda la caja está en negativo).
-    
-    **Acción Recomendada:** Revisar urgentemente los transportistas asociados a las órdenes con retraso (>0 días). La mejora del producto no servirá si la entrega falla.
+    🛑 **DIAGNÓSTICO:**
+    El **{pct_late:.1f}%** de los pedidos no cumplen la promesa de entrega.
+    Existe una correlación directa: Los clientes que califican con **1 Estrella** recibieron su pedido, en mediana, **{avg_delay_1star:.1f} días tarde**.
     """)
 
 # === TAB 3: SEGMENTACIÓN & AUDIENCIAS (AI) ===
