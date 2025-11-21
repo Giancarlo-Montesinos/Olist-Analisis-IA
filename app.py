@@ -97,9 +97,30 @@ with tab1:
         top_states = df_orders['customer_state'].value_counts().head(5).reset_index()
         top_states.columns = ['Estado', 'Pedidos']
         
-        fig_geo = px.bar(top_states, x='Estado', y='Pedidos', 
-                         title="Top 5 Regiones", color='Pedidos',
+        # --- MEJORA: DICCIONARIO DE NOMBRES ---
+        # Traducimos las siglas para que se entienda mejor
+        nombres_brasil = {
+            'SP': 'São Paulo',
+            'RJ': 'Rio de Janeiro',
+            'MG': 'Minas Gerais',
+            'RS': 'Rio Grande do Sul',
+            'PR': 'Paraná',
+            'SC': 'Santa Catarina',
+            'BA': 'Bahia'
+        }
+        # Creamos una nueva columna con el nombre completo
+        # Si no encuentra el nombre, deja la sigla original (usando un lambda)
+        top_states['Nombre Completo'] = top_states['Estado'].map(nombres_brasil).fillna(top_states['Estado'])
+        
+        fig_geo = px.bar(top_states, x='Nombre Completo', y='Pedidos', 
+                         title="Top 5 Regiones de Brasil", 
+                         text_auto='.2s', # Muestra el número encima de la barra (ej. 40k)
+                         color='Pedidos',
                          color_continuous_scale='Blues')
+        
+        # Ocultamos la barra de color lateral para que se vea más limpio
+        fig_geo.update_layout(coloraxis_showscale=False)
+        
         st.plotly_chart(fig_geo, use_container_width=True)
 
     # 4. FUNNEL OPERATIVO (Lo mantenemos pero más pequeño abajo)
@@ -159,7 +180,8 @@ with tab2:
     st.plotly_chart(fig_box, use_container_width=True)
     
     # 4. CONCLUSIÓN DE NEGOCIO
-    st.error("""
+    # ¡OJO A LA 'f' ANTES DE LAS COMILLAS! ES LA CLAVE.
+    st.error(f"""
     🛑 **DIAGNÓSTICO:**
     El **{pct_late:.1f}%** de los pedidos no cumplen la promesa de entrega.
     Existe una correlación directa: Los clientes que califican con **1 Estrella** recibieron su pedido, en mediana, **{avg_delay_1star:.1f} días tarde**.
